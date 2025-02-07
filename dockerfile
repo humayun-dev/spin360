@@ -1,5 +1,5 @@
-# Use the official Python image from Docker Hub
-FROM python:3.9-slim
+# Use a specific Python version
+FROM python:3.9.13-slim
 
 # Set the working directory in the container
 WORKDIR /app
@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 8080
 
 # Command to run the app using Flask's built-in server
-CMD ["python", "app.py"]
+CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
