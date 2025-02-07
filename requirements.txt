@@ -3,7 +3,7 @@ opencv-python
 numpy
 ultralytics  # For YOLO model
 gradio  # For creating the web interface
-torch  # For PyTorch model
+torch==2.5.1  # For PyTorch model
 torchvision  # For image-related tasks with PyTorch
 flask-cors  # If you need cross-origin support
 gunicorn  # For running the app in production (with Gunicorn)
