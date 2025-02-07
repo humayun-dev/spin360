@@ -11,8 +11,9 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads/"
 FRAMES_FOLDER = "assets/images/frames/"
 PROCESSED_FOLDER = "assets/images/processed/"
-YOLO_MODEL_PATH = "last.pt"  # YOLO model path
-SAM_MODEL_PATH = "sam2.1_b.pt"  # SAM model path
+YOLO_MODEL_PATH = "/spin360/last.pt"
+SAM_MODEL_PATH = "/spin360/sam2.1_b.pt"
+
 
 # Create necessary directories if they don't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
