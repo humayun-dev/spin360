@@ -1,8 +1,9 @@
 Flask
 opencv-python
 numpy
-ultralytics
-gradio
-torch
-torchvision  
-flask-cors    
+ultralytics  # For YOLO model
+gradio  # For creating the web interface
+torch  # For PyTorch model
+torchvision  # For image-related tasks with PyTorch
+flask-cors  # If you need cross-origin support
+gunicorn  # For running the app in production (with Gunicorn)
