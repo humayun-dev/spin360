@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    libgthread-2.0-0  
+    libglib2.0-0  # Correct package for libgthread
 
 # Set the working directory in the container
 WORKDIR /app
