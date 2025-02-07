@@ -1,12 +1,13 @@
 # Use a specific Python version
 FROM python:3.9.13-slim
 
-# Install system dependencies for OpenCV and other libraries
+# Install system dependencies for OpenCV, Gunicorn, and other libraries
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libsm6 \
     libxext6 \
-    libxrender-dev
+    libxrender-dev \
+    libgthread-2.0-0  
 
 # Set the working directory in the container
 WORKDIR /app
