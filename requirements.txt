@@ -1,7 +1,7 @@
 Flask
 opencv-python
 numpy
-ultralytics  # For YOLO model
+ultralytics==8.3.55  # For YOLO model
 gradio  # For creating the web interface
 torch==2.5.1  # For PyTorch model
 torchvision  # For image-related tasks with PyTorch
