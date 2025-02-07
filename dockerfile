@@ -9,19 +9,27 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libglib2.0-0  # Correct package for libgthread
 
-# Set the working directory in the container to the root directory (where all files are)
+# Install gsutil to download models from Google Cloud Storage
+RUN apt-get install -y gsutil
+
+# Set the working directory in the container
 WORKDIR /spin360
 
-# Copy all the application files into the container's working directory
+# Download models from Google Cloud Storage
+RUN gsutil cp gs://spin360models/last.pt /spin360/last.pt
+RUN gsutil cp gs://spin360models/sam2.1_b.pt /spin360/sam2.1_b.pt
+
+# Copy the rest of the application files into the container
 COPY . /spin360
 
 # Install dependencies from the requirements.txt file
+COPY requirements.txt /spin360
 RUN pip install --no-cache-dir -r /spin360/requirements.txt
 
 # Expose port 8080 to the outside world
 EXPOSE 8080
 
-# Install Gunicorn for serving the app
+# Install Gunicorn
 RUN pip install gunicorn
 
 # Command to run the app using Gunicorn
