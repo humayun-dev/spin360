@@ -4,3 +4,5 @@ numpy
 ultralytics
 gradio
 torch
+torchvision  
+flask-cors    
