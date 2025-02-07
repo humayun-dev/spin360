@@ -1,6 +1,13 @@
 # Use a specific Python version
 FROM python:3.9.13-slim
 
+# Install system dependencies for OpenCV and other libraries
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libsm6 \
+    libxext6 \
+    libxrender-dev
+
 # Set the working directory in the container
 WORKDIR /app
 
@@ -16,5 +23,8 @@ COPY . .
 # Expose port 8080 to the outside world
 EXPOSE 8080
 
-# Command to run the app using Flask's built-in server
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+# Install Gunicorn
+RUN pip install gunicorn
+
+# Command to run the app using Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
