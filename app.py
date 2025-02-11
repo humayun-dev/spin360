@@ -1,18 +1,19 @@
-from flask import Flask, request, jsonify, send_from_directory
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
 import os
 import cv2
 import numpy as np
-from ultralytics import YOLO,SAM
+from ultralytics import YOLO, SAM
 
-# Initialize Flask application
-app = Flask(__name__)
+# Initialize FastAPI application
+app = FastAPI()
 
 # Setup directories
 UPLOAD_FOLDER = "uploads/"
 FRAMES_FOLDER = "assets/images/frames/"
 PROCESSED_FOLDER = "assets/images/processed/"
-YOLO_MODEL_PATH = "/spin360/last.pt"
-SAM_MODEL_PATH = "/spin360/sam2.1_b.pt"
+YOLO_MODEL_PATH = "spin360/last.pt"
+SAM_MODEL_PATH = "spin360/sam2.1_b.pt"
 
 
 # Create necessary directories if they don't exist
@@ -79,7 +80,11 @@ def apply_edge_detection(image):
 
 # Function to normalize car's distance by resizing and placing on a white canvas
 def normalize_car_distance(image, mask, canvas_size=(2048, 1080), offset_x=0, offset_y=50, scale=1.2, reference_size=None):
+    # Convert boolean mask to uint8 before resizing
+    mask = mask.astype(np.uint8)
+    mask = cv2.resize(mask, (image.shape[1], image.shape[0]))
     mask = (mask * 255).astype(np.uint8)
+    
     car_pixels = cv2.bitwise_and(image, image, mask=mask)
     y_indices, x_indices = np.where(mask > 0)
 
@@ -88,6 +93,9 @@ def normalize_car_distance(image, mask, canvas_size=(2048, 1080), offset_x=0, of
         y_min, y_max = np.min(y_indices), np.max(y_indices)
         cropped_car = car_pixels[y_min:y_max + 1, x_min:x_max + 1]
         cropped_mask = mask[y_min:y_max + 1, x_min:x_max + 1]
+
+        if cropped_car.size == 0 or cropped_mask.size == 0:
+            return image, reference_size
 
         car_height, car_width = cropped_car.shape[:2]
         car_size = max(car_width, car_height)
@@ -99,29 +107,32 @@ def normalize_car_distance(image, mask, canvas_size=(2048, 1080), offset_x=0, of
         new_car_width = int(car_width * scale_factor)
         new_car_height = int(car_height * scale_factor)
 
+        if new_car_width <= 0 or new_car_height <= 0:
+            return image, reference_size
+
         cropped_car = cv2.resize(cropped_car, (new_car_width, new_car_height), interpolation=cv2.INTER_CUBIC)
         cropped_mask = cv2.resize(cropped_mask, (new_car_width, new_car_height), interpolation=cv2.INTER_NEAREST)
 
-        canvas_width, canvas_height = canvas_size
-        canvas = np.full((canvas_height, canvas_width, 3), 255, dtype=np.uint8)
+        canvas = np.full((*canvas_size[::-1], 3), 255, dtype=np.uint8)
 
-        x_offset = max(0, (canvas_width - new_car_width) // 2 + offset_x)
-        y_offset = max(0, (canvas_height - new_car_height) // 2 + offset_y)
+        x_offset = max(0, min((canvas_size[0] - new_car_width) // 2 + offset_x, canvas_size[0] - new_car_width))
+        y_offset = max(0, min((canvas_size[1] - new_car_height) // 2 + offset_y, canvas_size[1] - new_car_height))
 
-        x_offset = min(x_offset, canvas_width - new_car_width)
-        y_offset = min(y_offset, canvas_height - new_car_height)
+        roi_height = min(new_car_height, canvas_size[1] - y_offset)
+        roi_width = min(new_car_width, canvas_size[0] - x_offset)
 
         for c in range(3):
-            canvas[y_offset:y_offset + new_car_height, x_offset:x_offset + new_car_width, c] = np.where(
-                cropped_mask > 0,
-                cropped_car[:, :, c],
-                canvas[y_offset:y_offset + new_car_height, x_offset:x_offset + new_car_width, c]
+            canvas[y_offset:y_offset + roi_height, x_offset:x_offset + roi_width, c] = np.where(
+                cropped_mask[:roi_height, :roi_width] > 0,
+                cropped_car[:roi_height, :roi_width, c],
+                canvas[y_offset:y_offset + roi_height, x_offset:x_offset + roi_width, c]
             )
 
         return canvas, reference_size
-    else:
-        print("No valid car mask found.")
-        return image, reference_size
+    
+    return image, reference_size
+
+
 
 # Function to add ellipse shadow below the car
 def add_shadow_to_car(image, car_mask, shadow_offset=(10, 5), shadow_scale=1.5):
@@ -219,48 +230,69 @@ def combine_frames_to_video(frames_folder, output_video_path):
     return True
 
 
-# API endpoint to process video
-@app.route('/process_video', methods=['POST'])
-def process_video_api():
-    if 'video' not in request.files:
-        return jsonify({"error": "No video part in the request"}), 400
+# Convert the API endpoint to FastAPI
+@app.post("/process_video")
+async def process_video_api(video: UploadFile = File(...)):
+    try:
+        if not video:
+            raise HTTPException(status_code=400, detail="No video file uploaded")
 
-    video_file = request.files['video']
-    if video_file.filename == '':
-        return jsonify({"error": "No video file selected"}), 400
+        # Save the video to disk
+        video_path = os.path.join(UPLOAD_FOLDER, "input_video.mp4")
+        with open(video_path, "wb") as f:
+            content = await video.read()
+            f.write(content)
 
-    # Save the video to disk
-    video_path = os.path.join(UPLOAD_FOLDER, "input_video.mp4")
-    with open(video_path, "wb") as f:
-        f.write(video_file.read())
+        # Extract frames with status check
+        frames_extracted = extract_frames_sorted(video_path, FRAMES_FOLDER, interval=20)
+        if not frames_extracted:
+            return JSONResponse(
+                status_code=422,
+                content={"message": "No frames could be extracted from the video"}
+            )
 
-    # Extract frames from the video
-    frames_extracted = extract_frames_sorted(video_path, FRAMES_FOLDER, interval=20)
-    if not frames_extracted:
-        return jsonify({"error": "Failed to extract frames from video"}), 500
+        # Process frames with status check  
+        frames_processed = process_frames_with_depth_and_individual_tints(FRAMES_FOLDER, PROCESSED_FOLDER)
+        if not frames_processed:
+            return JSONResponse(
+                status_code=422,
+                content={"message": "No cars detected in video frames"}
+            )
 
-    # Process the frames
-    frames_processed = process_frames_with_depth_and_individual_tints(FRAMES_FOLDER, PROCESSED_FOLDER)
-    if not frames_processed:
-        return jsonify({"error": "Failed to process frames"}), 500
+        # Combine frames with status check
+        output_video_path = os.path.join(PROCESSED_FOLDER, "output_video.mp4")
+        video_created = combine_frames_to_video(PROCESSED_FOLDER, output_video_path)
+        if not video_created:
+            return JSONResponse(
+                status_code=422,
+                content={"message": "Could not create output video from processed frames"}
+            )
 
-    # Combine processed frames into a video
-    output_video_path = os.path.join(PROCESSED_FOLDER, "output_video.mp4")
-    video_created = combine_frames_to_video(PROCESSED_FOLDER, output_video_path)
-    if not video_created:
-        return jsonify({"error": "Failed to combine frames into video"}), 500
+        return JSONResponse({
+            "message": "Processing completed successfully",
+            "download_url": f"/download/{os.path.basename(output_video_path)}"
+        })
 
-    # Provide the processed video file for download
-    return jsonify({
-        "message": "Processing completed successfully",
-        "download_url": f"/download/{os.path.basename(output_video_path)}"
-    })
+    except Exception as e:
+        return JSONResponse(
+            status_code=422,
+            content={"message": f"Video processing failed: {str(e)}"}
+        )
 
 
-# Endpoint to serve processed video for download
-@app.route('/download/<filename>', methods=['GET'])
-def download_video(filename):
-    return send_from_directory(PROCESSED_FOLDER, filename)
+# Convert download endpoint to FastAPI
+from pathlib import Path
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+@app.get("/download/{filename}")
+async def download_video(filename: str):
+    base_path = Path(PROCESSED_FOLDER).resolve()
+    file_path = (base_path / filename).resolve()
+
+    if not file_path.is_file() or not str(file_path).startswith(str(base_path)):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        file_path,
+        media_type='application/octet-stream',
+        filename=filename
+    )
