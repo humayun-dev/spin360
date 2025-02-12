@@ -1,6 +1,7 @@
 services:
-  spin360:
+  cv_spin360:
     build: .
+    image: cv_spin360:latest
     ports:
       - 8080:8080
     volumes:
