@@ -1,0 +1,1 @@
+docker.io/muhammadshah/cars:latest
