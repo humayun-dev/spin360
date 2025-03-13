@@ -29,6 +29,7 @@ var/
 *.egg
 python_code.py
 # Virtual Environment
+.venv/
 venv/
 ENV/
 my_project_files.txt
