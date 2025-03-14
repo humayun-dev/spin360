@@ -303,7 +303,7 @@ async def process_video(
             
             # Step 2: Process the frames using YOLO and SAM models.
             # (Update the model paths as needed.)
-            yolo_model_path = "spin360/lastnew.pt"
+            yolo_model_path = "spin360/lastnew2.pt"
             sam_model_path = "spin360/sam2.1_l.pt"
             processed = process_frames_with_depth_and_individual_tints(frames_dir, processed_dir, yolo_model_path, sam_model_path)
             if not processed:
@@ -365,7 +365,7 @@ async def delete_video(filename: str):
         if not file_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         os.remove(file_path)
-        
+
         return JSONResponse({
             "message": f"File {filename} deleted successfully"
         })
