@@ -21,15 +21,19 @@ app = FastAPI()
 def rotate_image_with_padding(image, angle):
     """Rotate image without cropping by adding padding."""
     height, width = image.shape[:2]
+    # compute the diagonal of the image
     diagonal = int(np.sqrt(height**2 + width**2))
+    # Create a larger canvas to avoid cropping
     padded_image = cv2.copyMakeBorder(
         image,
         (diagonal - height) // 2, (diagonal - height) // 2,
         (diagonal - width) // 2, (diagonal - width) // 2,
         cv2.BORDER_CONSTANT, value=(0, 0, 0)
     )
+    # Get new center after padding
     padded_h, padded_w = padded_image.shape[:2]
     center = (padded_w // 2, padded_h // 2)
+    # apply rotation
     rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
     rotated_image = cv2.warpAffine(padded_image, rotation_matrix, (padded_w, padded_h))
     return rotated_image
@@ -40,10 +44,19 @@ def extract_corrected_frames(video_path, rotations, corrected_folder):
     Expects `rotations` as a list of dicts with keys "timestamp" (ms) and "x" (tilt angle).
     Only every 20th entry is used.
     """
+
+    # create output folder/directory if it doesn't exist
     os.makedirs(corrected_folder, exist_ok=True)
+
+    # open video file
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_counter = 1
+    frame_counter = 1 # counter for Sequential naming of frames
+    if not cap.isOpened():
+        print(f"Error: Unable to open video file {video_path}")
+        return False
+    
+    print("Extracting and correcting frames...")
     for idx, entry in enumerate(rotations):
         if idx % 20 != 0:
             continue
@@ -56,16 +69,19 @@ def extract_corrected_frames(video_path, rotations, corrected_folder):
         if not ret:
             print(f"Frame at {timestamp_ms} ms not found.")
             continue
-        # Correct tilt (note the negative sign as in your code)
+        # Correct tilt with padding
         corrected_frame = rotate_image_with_padding(frame, -x_tilt)
         corrected_frame = cv2.resize(corrected_frame, (1100, 1100))
+        # save corrected frame with sequential naming
         corrected_filename = os.path.join(corrected_folder, f"frame_{frame_counter}.jpg")
         cv2.imwrite(corrected_filename, corrected_frame)
         frame_counter += 1
     cap.release()
     print("Corrected frames saved successfully.")
+    return True if frame_counter > 1 else False
 
 def apply_black_tint(image, mask):
+    """Function to apply a grey color tint with 90% grey and 10% transparency"""
     tinted_image = image.copy()
     mask = (mask * 255).astype(np.uint8)
     black_color = np.array([0, 0, 0])
@@ -78,6 +94,7 @@ def apply_black_tint(image, mask):
     return tinted_image
 
 def apply_blur(image, mask):
+    """Function to apply blur to the segmented regions (for plate)"""
     blurred_image = image.copy()
     mask = (mask * 255).astype(np.uint8)
     blurred_region = image.copy()
@@ -85,21 +102,33 @@ def apply_blur(image, mask):
     return blurred_region
 
 def apply_edge_detection(image):
+    """Function to apply edge detection to the image"""
+
+    # Step 1: Use a stronger bilateral filter to smoothen while preserving edges
     bilateral_filtered = cv2.bilateralFilter(image, d=7, sigmaColor=70, sigmaSpace=70)
+    # Step 2: Convert to grayscale
     gray = cv2.cvtColor(bilateral_filtered, cv2.COLOR_BGR2GRAY)
+    # Step 3: Apply Canny edge detection with higher thresholds (less sensitive)
     edges = cv2.Canny(gray, threshold1=100, threshold2=150)
+    # Step 4: Reduce noise using a milder morphological opening
     kernel = np.ones((3, 3), np.uint8)
     edges = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # Step 5: Keep only very small noise removal to preserve fine details
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for contour in contours:
         if cv2.contourArea(contour) < 30:
             cv2.drawContours(edges, [contour], -1, 0, thickness=cv2.FILLED)
+
+    # Step 6: Reduce dilation to avoid thickening edges too much
     edges = cv2.dilate(edges, kernel, iterations=1)
+    # Step 7: Apply a mild Gaussian blur
     edges = cv2.GaussianBlur(edges, (5, 5), 2)
+    # Convert edges to a 3-channel image
     edges_colored = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
     return cv2.addWeighted(image, 0.8, edges_colored, 0.2, 0)
 
-def normalize_car_distance(image, mask, background_path="background.png", offset_x=0, offset_y=70, scale=1.5, reference_size=None):
+def normalize_car_distance(image, mask, background_path="background.png", offset_x=0, offset_y=50, scale=1.2, reference_size=None):
     mask = (mask * 255).astype(np.uint8)
     car_pixels = cv2.bitwise_and(image, image, mask=mask)
     y_indices, x_indices = np.where(mask > 0)
@@ -218,12 +247,18 @@ def images_to_video(image_folder, output_video, frame_rate=10):
     first_image_path = os.path.join(image_folder, images[0])
     frame = cv2.imread(first_image_path)
     height, width, _ = frame.shape
+
+    # define the codec and create VideoWriter object
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video = cv2.VideoWriter(output_video, fourcc, frame_rate, (width, height))
+
+    # write each image to the video
     for image_name in images:
         image_path = os.path.join(image_folder, image_name)
         frame = cv2.imread(image_path)
         video.write(frame)
+
+    # release the VideoWriter object
     video.release()
     print(f"Video saved as {output_video}")
     return output_video
@@ -259,7 +294,12 @@ async def process_video(
                 f.write(content)
             
             # Step 1: Extract corrected frames using the provided rotations data
-            extract_corrected_frames(video_path, rotations_data, frames_dir)
+            frames_extracted = extract_corrected_frames(video_path, rotations_data, frames_dir)
+            if not frames_extracted:
+                return JSONResponse(
+                    status_code=422,
+                    content={"message": "No frames could be extracted from the video"}
+                )
             
             # Step 2: Process the frames using YOLO and SAM models.
             # (Update the model paths as needed.)
@@ -300,9 +340,12 @@ async def process_video(
 @app.get("/download_and_delete/{filename}")
 async def download_and_delete_video(filename: str):
     try:
+        # locate the processed video file in persistent storage directory
         file_path = Path(PROCESSED_STORAGE_DIR) / filename
         if not file_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
+
+        # return the file as response
         response = FileResponse(
             file_path,
             media_type='application/octet-stream',
@@ -317,10 +360,12 @@ async def download_and_delete_video(filename: str):
 @app.get("/delete_video/{filename}")
 async def delete_video(filename: str):
     try:
+        # locate the processed video file in persistent storage directory
         file_path = Path(PROCESSED_STORAGE_DIR) / filename
         if not file_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         os.remove(file_path)
+        
         return JSONResponse({
             "message": f"File {filename} deleted successfully"
         })
